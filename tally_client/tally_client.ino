@@ -1,48 +1,88 @@
+//#define DEBUG
 #include <SPI.h>
 #include "nRF24L01.h"
 #include "RF24.h"
-#include "printf.h"
+#ifdef DEBUG
+  #include "printf.h"
+#endif
 
 #define LED_RED   2
 #define LED_GREEN 3
 #define ADDR_1    4
 #define ADDR_2    5
 #define ADDR_3    6
+#define ADDR_4    7
 
 #define MAX_NODES  6
+#define DELAY_SHORT 200
+#define DELAY_LONG  400
 
-RF24 radio(7,8);
+RF24 radio(9,10);
 
-int address;
-int blinkState = LOW;
+byte address;
+byte blinkState = LOW;
 long lastTimeDataReceived;
 long blinkMillis;
-const uint64_t listening_pipes[6] = { 0x3A3A3A3AF0LL, 0x3A3A3A3AE1LL, 0x3A3A3A3AD2LL, 0x3A3A3A3AC3LL, 0x3A3A3A3AB4LL, 0x3A3A3A3AA5LL };
+const uint64_t listening_pipes[6] = { 0x3A3A3A3AF0LL, 0x3A3A3A3AE1LL,
+                                      0x3A3A3A3AD2LL, 0x3A3A3A3AC3LL,
+                                      0x3A3A3A3AB4LL, 0x3A3A3A3AA5LL };
+byte ackValue;
 
 void sendAckBatteryValue() {
-  uint8_t ackByte = (uint8_t)(analogRead(A0) >> 2);
-//  printf("sending ack %d\n", ackByte);
-  radio.writeAckPayload(1, &ackByte, 1);
+  // analog reference is 1.1V / voltage divider consists of 18K + 5K6
+  // so analog * 0.045 gives us 43 for 4.3V and 30 for 3.0V
+  ackValue = analogRead(A0) * 0.045;
+#ifdef DEBUG
+  printf("sending ack %d\n", ackValue);
+#endif
+  radio.writeAckPayload(1, &ackValue, 1);
 }
 
 void setup() {
+#ifdef DEBUG
   Serial.begin(57600);
   printf_begin();
+#endif
 
   pinMode(LED_RED, OUTPUT);
   pinMode(LED_GREEN, OUTPUT);
   pinMode(ADDR_1, INPUT_PULLUP);
   pinMode(ADDR_2, INPUT_PULLUP);
   pinMode(ADDR_3, INPUT_PULLUP);
+  pinMode(ADDR_4, INPUT_PULLUP);
 
-  address = (digitalRead(ADDR_3) << 2) | (digitalRead(ADDR_2) << 1) | (digitalRead(ADDR_1) << 0);
-
+  // set reference to 1.1V
+  analogReference(INTERNAL);
+  
+  // read in the address
+  if(digitalRead(ADDR_1) == LOW) address = 1;
+  if(digitalRead(ADDR_2) == LOW) address |= 2;
+  if(digitalRead(ADDR_3) == LOW) address |= 4;
+  if(digitalRead(ADDR_4) == LOW) address |= 8;
+  
   if(address > MAX_NODES-1) {
     address = MAX_NODES-1;
   }
 
+#ifdef DEBUG
   printf("address: %d\n", address);
-
+#endif  
+  
+  // display the address as blinks
+  digitalWrite(LED_GREEN, HIGH);
+  delay(DELAY_LONG);
+  
+  for(int i = 0; i< address; i++) {
+    delay(DELAY_SHORT);
+    digitalWrite(LED_RED, HIGH);
+    delay(DELAY_SHORT);
+    digitalWrite(LED_RED, LOW);
+  }
+  
+  delay(DELAY_SHORT);
+  digitalWrite(LED_GREEN, LOW);
+  delay(DELAY_LONG);
+  
   radio.begin();
   radio.setAutoAck(1);
   radio.enableAckPayload();
@@ -60,7 +100,9 @@ void loop() {
   while(radio.available()) {
     uint8_t receivedByte;
     radio.read( &receivedByte, sizeof(uint8_t) );
-//    printf("got data %u\n",receivedByte);
+#ifdef DEBUG
+    printf("got data %u\n",receivedByte);
+#endif
 
     sendAckBatteryValue();
 
@@ -96,7 +138,6 @@ void loop() {
   } else {
     lastTimeDataReceived = currentMillis;
   }
-  
 }
 
 
